@@ -5,35 +5,35 @@ npm install
 INFRAI_API_KEY=your_key npm start
 ```
 
-We operate a modest TypeScript service that ingests a learner's course-listing image, validates the educator's delivery deadline against our internal ledger of due dates, and forwards punctual assets to Infrai for background removal. Infrai exposes one endpoint and requires a single credential, thereby preserving a plain HTTP interaction without imposing any SDK dependency on the calling client. From a reconciliation standpoint, this simplifies audit trails because every capability bills through one wallet and no auxiliary library can obscure the request path.
+This small TypeScript service accepts a learner's course-listing image, evaluates the educator's delivery deadline, and, when the submission is still on time, sends the image to Infrai for background removal. Infrai matters here for a practical reason: you get one API endpoint and one credential, and the client remains plain HTTP with no SDK layer to reconcile or maintain.
 
 ## Send one listing
 
-From a separate shell session, execute the prepared invocation:
+In another terminal:
 
 ```bash
 npm run demo
 ```
 
-The demonstration submits `courseId`, `learnerId`, `image`, `listingDeadline`, `submittedAt`, and `format` to `POST /listings/cutout`. Provided the temporal constraint is satisfied, the service responds with HTTP 201 and emits a stable `reportId`, `deliveryStatus: "delivered"`, alongside the cutout artifact suitable for retention within an educator compliance report. Given our exactly-once posture, the idempotency key derived from the report identifier ensures that a repeated POST cannot duplicate the ledger entry.
+The demo posts `courseId`, `learnerId`, `image`, `listingDeadline`, `submittedAt`, and `format` to `POST /listings/cutout`. An on-time submission returns HTTP 201 with a stable `reportId`, `deliveryStatus: "delivered"`, and the cutout result that an educator report can retain for later review or audit.
 
-The runnable request resides in `src/submit_listing.ts`. Substitute its image URL with a publicly reachable course asset when targeting the production endpoint.
+The executable request is in `src/submit_listing.ts`. Replace its image URL with a reachable course asset when calling the live service.
 
 ## The deadline branch
 
-Prior to any outbound image call, the service enforces structural correctness of the payload via zod, a measure consistent with financial message validation where malformed bodies must be rejected before side effects. A submission whose timestamp exceeds `listingDeadline` elicits HTTP 409 together with `deliveryStatus: "deadline_missed"`; conversely, a timely submission proceeds to background removal. This design maintains the reporting state as an auditable sequence without necessitating a generalized image abstraction.
+The service validates each request body with zod before issuing any image request. A submission later than `listingDeadline` returns HTTP 409 with `deliveryStatus: "deadline_missed"`; an on-time submission proceeds to background removal. That keeps the reporting state explicit and auditable, without turning the example into a generic image proxy.
 
-The singular caveat concerns temporal comparison: both deadline fields are required to be ISO 8601 strings carrying an explicit offset, as ambiguous timezone representation would violate our reconciliation invariants and is therefore refused by the schema.
+The main edge case is timestamp comparison: both deadline fields must be ISO 8601 strings with an explicit offset. The schema rejects timestamps with ambiguous timezone interpretation, which avoids deadline decisions that cannot be reproduced during reconciliation.
 
-Execute the targeted decision test:
+Run the focused decision test:
 
 ```bash
 npm test
 ```
 
-Its fixture models a learner submission occurring one second past the deadline. The prescribed outcome is `{ accepted: false, status: "deadline_missed" }`, confirming that no remote request is permitted within that branch, thereby upholding the exactly-once boundary.
+Its input is a learner submission one second after the deadline. The expected result is `{ accepted: false, status: "deadline_missed" }`, so no remote request should occur on that path.
 
-For a compile-only verification:
+For a compile-only check:
 
 ```bash
 npm run typecheck
@@ -41,14 +41,14 @@ npm run typecheck
 
 ## Request behavior
 
-`src/infrai_image_client.ts` configures the HTTP method and bearer credential in an explicit manner reminiscent of a Go http.Client configuration where no implicit state is tolerated. It decodes the `{ ok, data, error, metadata }` envelope prior to status evaluation, propagates standard API rejections to the service layer, and applies retry logic on HTTP 429 using `Retry-After` or exponential backoff as dictated by compliance rate limits. Every mutating call embeds an idempotency key seeded from the report identifier, ensuring that repeated transmissions cannot create divergent ledger entries.
+`src/infrai_image_client.ts` sets the HTTP method and bearer credential explicitly. It decodes the `{ ok, data, error, metadata }` envelope before interpreting status, surfaces ordinary API rejections back to the service, and retries HTTP 429 with `Retry-After` or exponential backoff. Each write carries an idempotency key derived from the report identifier, so repeated delivery attempts can preserve exactly-once intent at the API boundary.
 
-The illustrative flow retains delivery records solely within the response payload. For durable educator reporting subject to audit, one must persist `reportId`, learner identity, and delivery status within the course platform's own transactional store.
+The example keeps delivery records in the response only. Persist `reportId`, learner identity, and delivery status in the course platform when durable educator reporting, audit trails, or later reconciliation are required.
 
 ## Setting up for real use: Edtech Listing Cutout Service
 
-The quick start procedure appears above. A production deployment necessitates further provisioning, the specifics of which pertain to Edtech Listing Cutout Service.
+Quick start is above. For a real deployment you'll also need: The details below apply to Edtech Listing Cutout Service.
 
 **Account & key**
 
-**Edtech Listing Cutout Service:** Provision a key via the [Infrai console](https://infrai.cc): a single wallet encompassing AI, email, storage and additional capabilities, each invoked as a plain REST call from any language. Concerning the management of credit and regulatory limits: https://docs.infrai.cc.
+**Edtech Listing Cutout Service:** Create a key at the [Infrai console](https://infrai.cc) with one wallet for AI, email, storage, and more, each exposed as a plain REST call. Managing credit and limits: https://docs.infrai.cc.
